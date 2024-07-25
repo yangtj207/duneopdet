@@ -68,32 +68,28 @@ namespace hit {
     void produce(art::Event& evt, art::ProcessingFrame const&) override;
     void beginJob(art::ProcessingFrame const&) override;
 
-    std::vector<double> FillOutHitParameterVector(const std::vector<double>& input);
-
     const bool fFilterHits;
     const bool fFillHists;
 
     const std::string fCalDataModuleLabel;
     const std::string fAllHitsInstanceName;
 
-    const std::vector<int> fLongMaxHitsVec;    ///<Maximum number hits on a really long pulse train
-    const std::vector<int> fLongPulseWidthVec; ///<Sets width of hits used to describe long pulses
+    const int fLongMaxHits;       ///<Maximum number hits on a really long pulse train
+    const int fLongPulseWidth;    ///<Sets width of hits used to describe long pulses
 
-    const size_t fMaxMultiHit; ///<maximum hits for multi fit
-    const int fAreaMethod;     ///<Type of area calculation
-    const std::vector<double>
-      fAreaNormsVec;       ///<factors for converting area to same units as peak height
-    const double fChi2NDF; ///maximum Chisquared / NDF allowed for a hit to be saved
+    const size_t fMaxMultiHit;    ///<maximum hits for multi fit
+    const int fAreaMethod;        ///<Type of area calculation
+    const double fAreaNorm;       ///<factors for converting area to same units as peak height
+    const double fChi2NDF;        ///<maximum Chisquared / NDF allowed for a hit to be saved
 
-    const std::vector<float> fPulseHeightCuts;
-    const std::vector<float> fPulseWidthCuts;
-    const std::vector<float> fPulseRatioCuts;
+    const float fPulseHeightCut;
+    const float fPulseWidthCut;
+    const float fPulseRatioCut;
 
     std::atomic<size_t> fEventCount{0};
 
     //only Standard and Morphological implementation is threadsafe.
-    std::vector<std::unique_ptr<reco_tool::ICandidateHitFinder>>
-      fHitFinderToolVec; ///< For finding candidate hits
+    std::unique_ptr<reco_tool::ICandidateHitFinder> fHitFinderTool; ///< For finding candidate hits
     // only Marqdt implementation is threadsafe.
     std::unique_ptr<reco_tool::IPeakFitter> fPeakFitterTool; ///< Perform fit to candidate peaks
     //HitFilterAlg implementation is threadsafe.
@@ -113,19 +109,15 @@ namespace hit {
     , fFillHists(pset.get<bool>("FillHists", false))
     , fCalDataModuleLabel(pset.get<std::string>("CalDataModuleLabel"))
     , fAllHitsInstanceName(pset.get<std::string>("AllHitsInstanceName", ""))
-    , fLongMaxHitsVec(pset.get<std::vector<int>>("LongMaxHits", std::vector<int>() = {25, 25, 25}))
-    , fLongPulseWidthVec(
-        pset.get<std::vector<int>>("LongPulseWidth", std::vector<int>() = {16, 16, 16}))
+    , fLongMaxHits(pset.get<int>("LongMaxHits", 25))
+    , fLongPulseWidth(pset.get<int>("LongPulseWidth", 16))
     , fMaxMultiHit(pset.get<int>("MaxMultiHit"))
     , fAreaMethod(pset.get<int>("AreaMethod"))
-    , fAreaNormsVec(FillOutHitParameterVector(pset.get<std::vector<double>>("AreaNorms")))
+    , fAreaNorm(pset.get<double>("AreaNorm"))
     , fChi2NDF(pset.get<double>("Chi2NDF"))
-    , fPulseHeightCuts(
-        pset.get<std::vector<float>>("PulseHeightCuts", std::vector<float>() = {3.0, 3.0, 3.0}))
-    , fPulseWidthCuts(
-        pset.get<std::vector<float>>("PulseWidthCuts", std::vector<float>() = {2.0, 1.5, 1.0}))
-    , fPulseRatioCuts(
-        pset.get<std::vector<float>>("PulseRatioCuts", std::vector<float>() = {0.35, 0.40, 0.20}))
+    , fPulseHeightCut(pset.get<float>("PulseHeightCut", 3.0))
+    , fPulseWidthCut(pset.get<float>("PulseWidthCut", 1.0))
+    , fPulseRatioCut(pset.get<float>("PulseRatioCut", 0.35))
   {
     if (fFillHists && art::Globals::instance()->nthreads() > 1u) {
       throw art::Exception(art::errors::Configuration)
@@ -138,19 +130,8 @@ namespace hit {
     }
 
     // recover the tool to do the candidate hit finding
-    // Recover the vector of fhicl parameters for the ROI tools
-    const fhicl::ParameterSet& hitFinderTools = pset.get<fhicl::ParameterSet>("HitFinderToolVec");
-
-    fHitFinderToolVec.resize(hitFinderTools.get_pset_names().size());
-
-    for (const std::string& hitFinderTool : hitFinderTools.get_pset_names()) {
-      const fhicl::ParameterSet& hitFinderToolParamSet =
-        hitFinderTools.get<fhicl::ParameterSet>(hitFinderTool);
-      size_t planeIdx = hitFinderToolParamSet.get<size_t>("Plane");
-
-      fHitFinderToolVec.at(planeIdx) =
-        art::make_tool<reco_tool::ICandidateHitFinder>(hitFinderToolParamSet);
-    }
+    fHitFinderTool =
+      art::make_tool<reco_tool::ICandidateHitFinder>(pset.get<fhicl::ParameterSet>("HitFinderTool"));
 
     // Recover the peak fitting tool
     fPeakFitterTool =
@@ -162,38 +143,13 @@ namespace hit {
     // and one with all hits. The key to doing this will be a non-null
     // instance name for the second collection
     // (with no particular product label)
-    recob::HitCollectionCreator::declare_products(
-      producesCollector(), fAllHitsInstanceName, true, false); //fMakeRawDigitAssns);
-
+    produces<std::vector<recob::Hit>>();
     // and now the filtered hits...
     if (fAllHitsInstanceName != "")
-      recob::HitCollectionCreator::declare_products(
-        producesCollector(), "", true, false); //fMakeRawDigitAssns);
+      produces<std::vector<recob::Hit>>(fAllHitsInstanceName);
 
     return;
   } // GausOpHitFinder::GausOpHitFinder()
-
-  //-------------------------------------------------
-  //-------------------------------------------------
-  std::vector<double> GausOpHitFinder::FillOutHitParameterVector(const std::vector<double>& input)
-  {
-    if (input.size() == 0)
-      throw std::runtime_error(
-        "GausOpHitFinder::FillOutHitParameterVector ERROR! Input config vector has zero size.");
-
-    std::vector<double> output;
-    art::ServiceHandle<geo::Geometry const> geom;
-    const unsigned int N_PLANES = geom->Nplanes();
-
-    if (input.size() == 1)
-      output.resize(N_PLANES, input[0]);
-    else if (input.size() == N_PLANES)
-      output = input;
-    else
-      throw std::runtime_error("GausOpHitFinder::FillOutHitParameterVector ERROR! Input config "
-                               "vector size !=1 and !=N_PLANES.");
-    return output;
-  }
 
   //-------------------------------------------------
   //-------------------------------------------------
@@ -225,28 +181,18 @@ namespace hit {
     //TStopwatch StopWatch;
     //StopWatch.Reset();
 
-    // ################################
-    // ### Calling Geometry service ###
-    // ################################
-    art::ServiceHandle<geo::Geometry const> geom;
-
     // ###############################################
     // ### Making a ptr vector to put on the event ###
     // ###############################################
     // this contains the hit collection
     // and its associations to wires and raw digits
-    recob::HitCollectionCreator allHitCol(evt, fAllHitsInstanceName, true, false);
-
-    // Handle the filtered hits collection...
-    recob::HitCollectionCreator hcol(evt, "", true, false);
-    recob::HitCollectionCreator* filteredHitCol = 0;
-
-    if (fFilterHits) filteredHitCol = &hcol;
+    auto allHitCol = std::make_unique< std::vector< recob::Hit > >();
+    auto filteredHitCol = std::make_unique< std::vector< recob::Hit > >();
 
     //store in a thread safe way
     struct hitstruct {
       recob::Hit hit_tbb;
-      art::Ptr<recob::Wire> wire_tbb;
+      art::Ptr<recob::OpWaveform> wire_tbb;
     };
 
     tbb::concurrent_vector<hitstruct> hitstruct_vec;
@@ -257,54 +203,54 @@ namespace hit {
     // ##########################################
     // ### Reading in the Wire List object(s) ###
     // ##########################################
-    art::Handle<std::vector<recob::Wire>> wireVecHandle;
-    evt.getByLabel(fCalDataModuleLabel, wireVecHandle);
+    art::Handle<std::vector<recob::OpWaveform>> opVecHandle;
+    evt.getByLabel(fCalDataModuleLabel, opVecHandle);
 
     //#################################################
     //###    Set the charge determination method    ###
     //### Default is to compute the normalized area ###
     //#################################################
     std::function<double(double, double, double, double, int, int)> chargeFunc =
-      [](double peakMean, double peakAmp, double peakWidth, double areaNorm, int low, int hi) {
-        return std::sqrt(2 * TMath::Pi()) * peakAmp * peakWidth / areaNorm;
-      };
-
+      [](double /* peakMean */,
+         double peakAmp,
+         double peakWidth,
+         double areaNorm,
+         int /* low */,
+         int /* hi */) { return std::sqrt(2 * TMath::Pi()) * peakAmp * peakWidth / areaNorm; };
+    
     //##############################################
     //### Alternative is to integrate over pulse ###
     //##############################################
     if (fAreaMethod == 0)
-      chargeFunc =
-        [](double peakMean, double peakAmp, double peakWidth, double areaNorm, int low, int hi) {
-          double charge(0);
-          for (int sigPos = low; sigPos < hi; sigPos++)
-            charge += peakAmp * TMath::Gaus(sigPos, peakMean, peakWidth);
-          return charge;
-        };
-
+      chargeFunc = [](double peakMean,
+                      double peakAmp,
+                      double peakWidth,
+                      double /* areaNorm */,
+                      int low,
+                      int hi) {
+        double charge(0);
+        for (int sigPos = low; sigPos < hi; sigPos++)
+          charge += peakAmp * TMath::Gaus(sigPos, peakMean, peakWidth);
+        return charge;
+      };
+    
     //##############################
     //### Looping over the wires ###
     //##############################
-    //for(size_t wireIter = 0; wireIter < wireVecHandle->size(); wireIter++)
+    //for(size_t opIter = 0; opIter < opVecHandle->size(); opIter++)
     //{
     tbb::parallel_for(
       static_cast<std::size_t>(0),
-      wireVecHandle->size(),
-      [&](size_t& wireIter) {
+      opVecHandle->size(),
+      [&](size_t& opIter) {
         // ####################################
         // ### Getting this particular wire ###
         // ####################################
-        art::Ptr<recob::Wire> wire(wireVecHandle, wireIter);
+        art::Ptr<recob::OpWaveform> wire(opVecHandle, opIter);
 
         // --- Setting Channel Number and Signal type ---
 
         raw::ChannelID_t channel = wire->Channel();
-
-        // get the WireID for this hit
-        std::vector<geo::WireID> wids = geom->ChannelToWire(channel);
-        // for now, just take the first option returned from ChannelToWire
-        geo::WireID wid = wids[0];
-        // We need to know the plane to look up parameters
-        geo::PlaneID::PlaneID_t plane = wid.Plane;
 
         // ----------------------------------------------------------
         // -- Setting the appropriate signal widths and thresholds --
@@ -314,7 +260,7 @@ namespace hit {
         // #################################################
         // ### Set up to loop over ROI's for this wire   ###
         // #################################################
-        const recob::Wire::RegionsOfInterest_t& signalROI = wire->SignalROI();
+        const recob::OpWaveform::RegionsOfInterest_t& signalROI = wire->SignalROI();
 
         // for (const auto& range : signalROI.get_ranges()) {
         tbb::parallel_for(
@@ -332,9 +278,9 @@ namespace hit {
             reco_tool::ICandidateHitFinder::HitCandidateVec hitCandidateVec;
             reco_tool::ICandidateHitFinder::MergeHitCandidateVec mergedCandidateHitVec;
 
-            fHitFinderToolVec.at(plane)->findHitCandidates(
+            fHitFinderTool->findHitCandidates(
               range, 0, channel, count, hitCandidateVec);
-            fHitFinderToolVec.at(plane)->MergeHitCandidates(
+            fHitFinderTool->MergeHitCandidates(
               range, hitCandidateVec, mergedCandidateHitVec);
 
             // #######################################################
@@ -390,11 +336,11 @@ namespace hit {
               // ### Also do this if chi^2 is too large              ###
               // #######################################################
               if (mergedCands.size() > fMaxMultiHit || nGausForFit * chi2PerNDF > fChi2NDF) {
-                int longPulseWidth = fLongPulseWidthVec.at(plane);
+                int longPulseWidth = fLongPulseWidth;
                 int nHitsThisPulse = (endT - startT) / longPulseWidth;
 
-                if (nHitsThisPulse > fLongMaxHitsVec.at(plane)) {
-                  nHitsThisPulse = fLongMaxHitsVec.at(plane);
+                if (nHitsThisPulse > fLongMaxHits) {
+                  nHitsThisPulse = fLongMaxHits;
                   longPulseWidth = (endT - startT) / nHitsThisPulse;
                 }
 
@@ -463,8 +409,8 @@ namespace hit {
 
                 // ### Charge ###
                 float charge =
-                  chargeFunc(peakMean, peakAmp, peakWidth, fAreaNormsVec[plane], startT, endT);
-                ;
+                  chargeFunc(peakMean, peakAmp, peakWidth, fAreaNorm, startT, endT);
+                
                 float chargeErr =
                   std::sqrt(TMath::Pi()) * (peakAmpErr * peakWidthErr + peakWidthErr * peakAmpErr);
 
@@ -475,9 +421,11 @@ namespace hit {
                 // ### Sum of ADC counts
                 double sumADC = std::accumulate(sumStartItr, sumEndItr, 0.);
 
+                geo::WireID wid;
+                recob::Wire fakewire;
                 // ok, now create the hit
                 recob::HitCreator hitcreator(
-                  *wire,                      // wire reference
+                  fakewire,                   // wire reference
                   wid,                        // wire ID
                   startT + roiFirstBinTick,   // start_tick TODO check
                   endT + roiFirstBinTick,     // end_tick TODO check
@@ -523,8 +471,8 @@ namespace hit {
                           });
 
                 // Reject if the first hit fails the PH/wid cuts
-                if (filteredHitVec.front().PeakAmplitude() < fPulseHeightCuts.at(plane) ||
-                    filteredHitVec.front().RMS() < fPulseWidthCuts.at(plane))
+                if (filteredHitVec.front().PeakAmplitude() < fPulseHeightCut ||
+                    filteredHitVec.front().RMS() < fPulseWidthCut)
                   filteredHitVec.clear();
 
                 // Now check other hits in the snippet
@@ -533,7 +481,7 @@ namespace hit {
                   float largestPH = filteredHitVec.front().PeakAmplitude();
 
                   // Find where the pulse heights drop below threshold
-                  float threshold(fPulseRatioCuts.at(plane));
+                  float threshold(fPulseRatioCut);
 
                   std::vector<recob::Hit>::iterator smallHitItr =
                     std::find_if(filteredHitVec.begin(),
@@ -571,11 +519,11 @@ namespace hit {
     );        //end tbb parallel for
 
     for (size_t i = 0; i < hitstruct_vec.size(); i++) {
-      allHitCol.emplace_back(hitstruct_vec[i].hit_tbb, hitstruct_vec[i].wire_tbb);
+      allHitCol->emplace_back(hitstruct_vec[i].hit_tbb); //, hitstruct_vec[i].wire_tbb);
     }
 
     for (size_t j = 0; j < filthitstruct_vec.size(); j++) {
-      filteredHitCol->emplace_back(filthitstruct_vec[j].hit_tbb, filthitstruct_vec[j].wire_tbb);
+      filteredHitCol->emplace_back(filthitstruct_vec[j].hit_tbb);//, filthitstruct_vec[j].wire_tbb);
     }
 
     //==================================================================================================
@@ -587,17 +535,20 @@ namespace hit {
       // specified for the "all hits" collection, then
       // only save the filtered hits to the event
       if (fAllHitsInstanceName == "") {
-        filteredHitCol->put_into(evt);
-
+        //filteredHitCol->put_into(evt);
+        evt.put(std::move(filteredHitCol));
         // otherwise, save both
       }
       else {
-        filteredHitCol->put_into(evt);
-        allHitCol.put_into(evt);
+        //filteredHitCol->put_into(evt);
+        //allHitCol.put_into(evt);
+        evt.put(std::move(filteredHitCol), fAllHitsInstanceName);
+        evt.put(std::move(allHitCol));
       }
     }
     else {
-      allHitCol.put_into(evt);
+      //allHitCol.put_into(evt);
+      evt.put(std::move(allHitCol));
     }
 
     // Keep track of events processed
