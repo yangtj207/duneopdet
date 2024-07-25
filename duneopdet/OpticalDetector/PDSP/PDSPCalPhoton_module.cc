@@ -75,6 +75,7 @@ private:
   std::string   fResponseFile;
   std::string   fFiltFunc;
   std::vector<double> fPECalib;
+  
   int ntbin;
   TH1D *wienerfilter;
   TH1D *elecres;
@@ -83,6 +84,7 @@ private:
   TF1 *filtfun;
 
   std::unique_ptr<pds::PDSMeanRMS> pdsMeanRMS_;  //Tool to get pedestal and RMS
+  float roi_threshold;
 
 };
 
@@ -106,12 +108,13 @@ double CalcMedian(std::vector<short int> scores){
 
 pdsp::PDSPCalPhoton::PDSPCalPhoton(fhicl::ParameterSet const& p)
   : EDProducer{p},
-  fRawOpWaveformLabel(p.get<art::InputTag>("RawOpWaveformLabel")),
-  fResponseFile(p.get<std::string>("ResponseFile")),
-  fFiltFunc(p.get<std::string>("FiltFunc")),
-  fPECalib(p.get<std::vector<double>>("PECalib")),
-  ntbin(2000),
-  pdsMeanRMS_{art::make_tool<pds::PDSMeanRMS>(p.get<fhicl::ParameterSet>("pdsMeanRMS"))}
+    fRawOpWaveformLabel(p.get<art::InputTag>("RawOpWaveformLabel")),
+    fResponseFile(p.get<std::string>("ResponseFile")),
+    fFiltFunc(p.get<std::string>("FiltFunc")),
+    fPECalib(p.get<std::vector<double>>("PECalib")),
+    ntbin(2000),
+    pdsMeanRMS_{art::make_tool<pds::PDSMeanRMS>(p.get<fhicl::ParameterSet>("pdsMeanRMS"))},
+    roi_threshold(p.get<float>("roi_threshold"))
 {
   // Wiener filtered waveform
   produces<std::vector<recob::OpWaveform>>("wiener");
@@ -274,8 +277,51 @@ void pdsp::PDSPCalPhoton::produce(art::Event& e)
         wfimpulse_shift[i] = wfimpulse[i-95]; 
       }
     }
-    recob::OpWaveform out_recowaveFinal2(wf->TimeStamp(), wf->ChannelNumber(), wfimpulse_shift);
-    out_recowaveforms2->emplace_back(std::move(out_recowaveFinal2));
+    std::vector<bool> inroi(ntbin,false);
+    for (int i = 0; i<ntbin; ++i){
+      if (wfimpulse_shift[i] > roi_threshold){
+        for (int j = i - 100; j < i + 100; ++j){
+          if (j>=0 && j<ntbin){
+            inroi[j] = true;
+          }
+        }
+      }
+    }
+
+    recob::OpWaveform::RegionsOfInterest_t rois(ntbin);
+    std::vector<float> sigs;
+    int lastsignaltick = -1;
+    int roistart = -1;
+    bool hasROI = false;
+    for (int i = 0; i < ntbin; ++i) {
+      if (inroi[i]) {
+        hasROI = true;
+        if (sigs.empty()) {
+          sigs.push_back(wfimpulse_shift[i]);
+          lastsignaltick = i;
+          roistart = i;
+        }
+        else {
+          if (i != lastsignaltick + 1) {
+            rois.add_range(roistart, std::move(sigs));
+            sigs.clear();
+            sigs.push_back(wfimpulse_shift[i]);
+            lastsignaltick = i;
+            roistart = i;
+          }
+          else {
+            sigs.push_back(wfimpulse_shift[i]);
+            lastsignaltick = i;
+          }
+        }
+      }
+    }    
+    if (!sigs.empty()) { rois.add_range(roistart, std::move(sigs)); }
+
+
+    //recob::OpWaveform out_recowaveFinal2(wf->TimeStamp(), wf->ChannelNumber(), wfimpulse_shift);
+    //out_recowaveforms2->emplace_back(std::move(out_recowaveFinal2));
+    if (hasROI) out_recowaveforms2->emplace_back(recob::OpWaveform(wf->TimeStamp(), wf->ChannelNumber(), rois));
     util::CreateAssn(*this, e, *out_recowaveforms2, wf, *recorawassn2);
 
   }
