@@ -1,0 +1,48 @@
+#include "services_dune.fcl"
+#include "PDSNoiseFilter.fcl"
+#include "protodune_tools_dune.fcl"
+
+process_name: PDSPGausOpHit
+
+services:
+{
+  #Load the service that manages root files for histograms.
+  TFileService: { fileName: "gausophit.root" }
+  TimeTracker:       {}
+  MemoryTracker:     {}     #default is one
+                @table::protodune_data_reco_services
+  message:      @local::standard_info
+  IFDH: {}
+}
+
+#source is now a root file
+source:
+{
+  module_type: RootInput
+  maxEvents:  1            # Number of events to create
+}
+
+outputs:
+{
+  out1:
+    {
+      compressionLevel: 1
+      module_type: RootOutput
+      fileName: "%ifb_ophit.root"
+      dataTier:    "full-reconstructed"
+    }
+}
+
+physics:
+{
+ producers:{
+     gausophit: @local::gausophit_pdsp
+ }
+# filters:  {} 
+# analyzers:{}
+  reco:   [gausophit ]
+  output: [ out1 ]
+  trigger_paths : [ reco ]
+  end_paths: [ output ]
+}
+
