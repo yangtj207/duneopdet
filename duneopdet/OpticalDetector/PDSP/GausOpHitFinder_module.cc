@@ -422,7 +422,7 @@ namespace hit {
                 double sumADC = std::accumulate(sumStartItr, sumEndItr, 0.);
 
                 geo::WireID wid;
-                recob::Wire fakewire;
+                recob::Wire fakewire(0, wire->Channel(), geo::kUnknown);
                 // ok, now create the hit
                 recob::HitCreator hitcreator(
                   fakewire,                   // wire reference
