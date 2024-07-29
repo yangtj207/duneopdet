@@ -249,7 +249,7 @@ void pdsp::PDSPCalPhoton::produce(art::Event& e)
     }
     recob::OpWaveform out_recowaveFinal(wf->TimeStamp(), wf->ChannelNumber(), wfwiener);
     out_recowaveforms1->emplace_back(std::move(out_recowaveFinal));
-    util::CreateAssn(*this, e, *out_recowaveforms1, wf, *recorawassn1);
+    util::CreateAssn(*this, e, *out_recowaveforms1, wf, *recorawassn1, "wiener");
 
     // Apply Gaussian filter and remove electronics response
     for (int i = 0; i<ntbin; ++i){
@@ -321,9 +321,10 @@ void pdsp::PDSPCalPhoton::produce(art::Event& e)
 
     //recob::OpWaveform out_recowaveFinal2(wf->TimeStamp(), wf->ChannelNumber(), wfimpulse_shift);
     //out_recowaveforms2->emplace_back(std::move(out_recowaveFinal2));
-    if (hasROI) out_recowaveforms2->emplace_back(recob::OpWaveform(wf->TimeStamp(), wf->ChannelNumber(), rois));
-    util::CreateAssn(*this, e, *out_recowaveforms2, wf, *recorawassn2);
-
+    if (hasROI){
+      out_recowaveforms2->emplace_back(recob::OpWaveform(wf->TimeStamp(), wf->ChannelNumber(), rois));
+      util::CreateAssn(*this, e, *out_recowaveforms2, wf, *recorawassn2);
+    }
   }
   e.put(std::move(out_recowaveforms1),"wiener");
   e.put(std::move(out_recowaveforms2));
