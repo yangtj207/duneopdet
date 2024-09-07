@@ -52,7 +52,18 @@ namespace pds{
     for (size_t i = 0; i<waveform.size(); ++i){
       data[i] = waveform[i] - med;
     }
+    compute_pedestal(data, raw_adc_thresh);
+    for (size_t i = 0; i<data.size(); ++i){
+      data[i] = data[i] - mean_;
+    }
     
+    for (int i = 0; i<n_iter; ++i){
+      compute_pedestal(data, rms_thresh * rms_);
+      for (size_t j = 0; j<data.size(); ++j){
+        data[j] = data[j] - mean_;
+      }
+    }
+
     return;
   }
 
@@ -77,7 +88,18 @@ namespace pds{
     mean_ = 0;
     rms_ = 0;
     int n = 0;
-    
+    for (auto const & adc : waveform){
+      if (adc < threshold){
+        mean_ += adc;
+        rms_ += adc*adc;
+        ++n;
+      }
+    }
+    if (n){
+      mean_ /=n;
+      rms_ = sqrt(rms_/n - mean*mean);
+    }
+  }
 }
 
 DEFINE_ART_CLASS_TOOL(pds::PDSMeanRMSLZ)
