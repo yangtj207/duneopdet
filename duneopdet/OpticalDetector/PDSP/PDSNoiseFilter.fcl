@@ -25,7 +25,7 @@ calphoton_pdsp:
 #    }
     pdsMeanRMS:{
         tool_type: PDSMeanRMSLZ
-        raw_adc_thresh: 200
+        raw_adc_thresh: 20
         rms_thresh: 3
         n_iter: 3
     }

@@ -12,6 +12,11 @@ cet_build_plugin(PDSMeanRMSDT art::tool
   #ROOT_BASIC_LIB_LIST
 )
 
+cet_build_plugin(PDSMeanRMSLZ art::tool
+  LIBRARIES PRIVATE
+  ROOT::MathCore
+)
+
 cet_build_plugin(GausOpHitFinder art::EDProducer
   LIBRARIES PRIVATE
   larreco::HitFinder
@@ -32,6 +37,19 @@ cet_build_plugin(GausOpHitFinder art::EDProducer
   ROOT::Hist
   ROOT::MathCore
   TBB::tbb
+)
+
+cet_build_plugin(PDWaveforms art::EDAnalyzer
+  LIBRARIES PRIVATE
+  lardataobj::RecoBase
+  art_root_io::TFileService_service
+)
+
+cet_build_plugin(PDOpHits art::EDAnalyzer
+  LIBRARIES PRIVATE
+  lardataobj::RecoBase
+  art_root_io::TFileService_service
+  ROOT::Tree
 )
 
 install_headers()
