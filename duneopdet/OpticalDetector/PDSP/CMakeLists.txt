@@ -52,6 +52,13 @@ cet_build_plugin(PDOpHits art::EDAnalyzer
   ROOT::Tree
 )
 
+cet_build_plugin(MichelWF art::EDAnalyzer
+  LIBRARIES PRIVATE
+  lardataobj::RecoBase
+  art_root_io::TFileService_service
+  ROOT::Gpad
+)
+
 install_headers()
 install_fhicl()
 install_source()
